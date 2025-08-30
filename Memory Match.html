@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memory Match Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0F172A;
+            color: #E2E8F0;
+            user-select: none;
+        }
+        .card {
+            width: 100px;
+            height: 100px;
+            background-color: #334155;
+            cursor: pointer;
+            transition: transform 0.3s, background-color 0.3s;
+            transform-style: preserve-3d;
+            position: relative;
+        }
+        .card.flipped {
+            transform: rotateY(180deg);
+        }
+        .card .front, .card .back {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            color: #E2E8F0;
+            border-radius: 12px;
+            border: 2px solid #64748B;
+        }
+        .card .back {
+            transform: rotateY(180deg);
+            background-color: #1E293B;
+        }
+        .card.matched {
+            background-color: #10B981;
+            border-color: #059669;
+        }
+        .game-info {
+            background-color: #1E293B;
+        }
+        .message-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(30, 41, 59, 0.95);
+            padding: 2rem;
+            border-radius: 12px;
+            z-index: 100;
+        }
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4">
+    <div class="relative w-full max-w-2xl mx-auto">
+        <div id="messageBox" class="hidden message-box border border-gray-600 shadow-xl text-center">
+            <h2 id="messageTitle" class="text-3xl font-bold mb-2"></h2>
+            <p id="messageText" class="text-lg mb-6"></p>
+            <div id="endGameButtons" class="button-group">
+                <button id="restartBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-200">Play Again</button>
+            </div>
+            <div id="loadingMessage" class="hidden flex justify-center items-center py-4 mt-4">
+                <div class="loading-spinner mr-2"></div>
+                <span class="text-gray-400">Thinking...</span>
+            </div>
+        </div>
+        
+        <h1 class="text-4xl font-bold text-center mb-6 text-white drop-shadow-md">Memory Match</h1>
+        
+        <div class="game-info rounded-xl p-4 mb-6 shadow-lg flex justify-around items-center">
+            <div class="text-center">
+                <p class="text-sm text-gray-400">Moves</p>
+                <p id="moves" class="text-2xl font-bold text-white">0</p>
+            </div>
+            <div class="text-center">
+                <p class="text-sm text-gray-400">Time</p>
+                <p id="timer" class="text-2xl font-bold text-white">0s</p>
+            </div>
+        </div>
+        <div class="flex justify-center flex-wrap gap-4 mb-6">
+            <button id="pauseResumeBtn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-200">
+                Pause
+            </button>
+            <button id="resetBtn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-200">
+                Reset
+            </button>
+        </div>
+        
+        <div id="gameBoard" class="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 gap-4"></div>
+    </div>
+
+    <script>
+        const gameBoard = document.getElementById('gameBoard');
+        const movesEl = document.getElementById('moves');
+        const timerEl = document.getElementById('timer');
+        const messageBox = document.getElementById('messageBox');
+        const messageTitle = document.getElementById('messageTitle');
+        const messageText = document.getElementById('messageText');
+        const endGameButtons = document.getElementById('endGameButtons');
+        const loadingMessage = document.getElementById('loadingMessage');
+        const pauseResumeBtn = document.getElementById('pauseResumeBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        let cardsData = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+        let cards = [];
+        let flippedCards = [];
+        let matchedCards = [];
+        let moves = 0;
+        let timer = 0;
+        let timerInterval;
+        let isBoardLocked = false;
+        let isPaused = false;
+
+        const shuffle = (array) => {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        };
+
+        const createCard = (value) => {
+            const card = document.createElement('div');
+            card.classList.add('card', 'rounded-xl', 'shadow-md');
+            card.dataset.value = value;
+            card.innerHTML = `
+                <div class="front bg-gray-600 text-white flex items-center justify-center text-4xl font-bold">?</div>
+                <div class="back text-white flex items-center justify-center text-4xl font-bold">${value}</div>
+            `;
+            card.addEventListener('click', flipCard);
+            return card;
+        };
+
+        const startGame = (data = cardsData) => {
+            // Reset game state
+            cards = shuffle([...data, ...data]);
+            flippedCards = [];
+            matchedCards = [];
+            moves = 0;
+            timer = 0;
+            isBoardLocked = false;
+            isPaused = false;
+            
+            // Clear board and update UI
+            gameBoard.innerHTML = '';
+            movesEl.textContent = moves;
+            timerEl.textContent = `${timer}s`;
+            messageBox.classList.add('hidden');
+            pauseResumeBtn.textContent = 'Pause';
+            
+            // Populate board
+            cards.forEach(value => {
+                gameBoard.appendChild(createCard(value));
+            });
+
+            // Start the timer
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                timer++;
+                timerEl.textContent = `${timer}s`;
+            }, 1000);
+        };
+
+        const flipCard = (event) => {
+            const clickedCard = event.currentTarget;
+            
+            // Prevent flipping if board is locked, paused, card is already flipped, or matched
+            if (isBoardLocked || isPaused || flippedCards.includes(clickedCard) || matchedCards.includes(clickedCard)) {
+                return;
+            }
+
+            clickedCard.classList.add('flipped');
+            flippedCards.push(clickedCard);
+
+            if (flippedCards.length === 2) {
+                isBoardLocked = true;
+                moves++;
+                movesEl.textContent = moves;
+
+                const [card1, card2] = flippedCards;
+                if (card1.dataset.value === card2.dataset.value) {
+                    // Match found
+                    matchedCards.push(card1, card2);
+                    card1.classList.add('matched');
+                    card2.classList.add('matched');
+                    isBoardLocked = false;
+                    
+                    flippedCards = [];
+
+                    // Check for win condition
+                    if (matchedCards.length === cards.length) {
+                        endGame(true);
+                    }
+                } else {
+                    // No match, flip back after a delay
+                    setTimeout(() => {
+                        card1.classList.remove('flipped');
+                        card2.classList.remove('flipped');
+                        flippedCards = [];
+                        isBoardLocked = false;
+                    }, 1000);
+                }
+            }
+        };
+
+        const endGame = (isWin) => {
+            clearInterval(timerInterval);
+            if (isWin) {
+                messageTitle.textContent = 'Congratulations!';
+                messageText.textContent = `You finished in ${moves} moves and ${timer} seconds! Click the button below to get a personalized message.`;
+                endGameButtons.innerHTML = `<button id="generateMessageBtn" class="bg-pink-600 hover:bg-pink-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-200">✨Generate Personalized Message✨</button>
+                                            <button id="restartBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-200">Play Again</button>`;
+                document.getElementById('generateMessageBtn').addEventListener('click', generateWinMessage);
+                document.getElementById('restartBtn').addEventListener('click', () => startGame(cardsData));
+            } else {
+                messageTitle.textContent = 'Game Over';
+                messageText.textContent = 'Better luck next time!';
+                endGameButtons.innerHTML = `<button id="restartBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg shadow-md transition-colors duration-200">Play Again</button>`;
+                document.getElementById('restartBtn').addEventListener('click', () => startGame(cardsData));
+            }
+            messageBox.classList.remove('hidden');
+        };
+
+        const generateWinMessage = async () => {
+            loadingMessage.classList.remove('hidden');
+            const prompt = `Generate a very creative and congratulatory message for a player who just won a memory matching game. The player won in ${moves} moves and ${timer} seconds. The message should be friendly and encouraging, and mention their performance. Keep it under 2 sentences.`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }]
+            };
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error('API call failed');
+                const result = await response.json();
+                const aiText = result.candidates[0].content.parts[0].text;
+                messageText.textContent = aiText;
+            } catch (error) {
+                console.error("Error generating message:", error);
+                messageText.textContent = "Sorry, I couldn't generate a personalized message right now. Try again later!";
+            } finally {
+                loadingMessage.classList.add('hidden');
+            }
+        };
+
+        const togglePause = () => {
+            isPaused = !isPaused;
+            if (isPaused) {
+                clearInterval(timerInterval);
+                pauseResumeBtn.textContent = 'Resume';
+            } else {
+                timerInterval = setInterval(() => {
+                    timer++;
+                    timerEl.textContent = `${timer}s`;
+                }, 1000);
+                pauseResumeBtn.textContent = 'Pause';
+            }
+        };
+
+        pauseResumeBtn.addEventListener('click', togglePause);
+        resetBtn.addEventListener('click', () => startGame());
+        
+        window.onload = () => startGame();
+    </script>
+</body>
+</html>
